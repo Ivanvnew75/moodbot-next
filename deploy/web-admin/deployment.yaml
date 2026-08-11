@@ -1,0 +1,142 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: web-admin-config
+  namespace: moodbot
+  labels:
+    app.kubernetes.io/name: web-admin
+    app.kubernetes.io/part-of: moodbot
+data:
+  SERVER_PORT: "8080"
+  LOG_LEVEL: "info"
+  LOG_FORMAT: "json"
+  ANSWERS_URL: "http://answers.moodbot.svc.cluster.local"
+  ANALYTICS_URL: "http://analytics.moodbot.svc.cluster.local"
+  RECOMMENDER_URL: "http://recommender.moodbot.svc.cluster.local"
+  # Сессия на неделю. Дольше — неудобно отзывать, короче — человек
+  # будет каждый раз просить у бота новую ссылку.
+  SESSION_TTL: "168h"
+  SECURE_COOKIE: "true"
+  # Таймаут к соседям меньше, чем таймаут ingress к нам (15с):
+  # иначе ingress оборвёт соединение раньше, чем мы успеем отдать
+  # частично собранную страницу, и деградация не сработает.
+  HTTP_TIMEOUT: "4s"
+  HTTP_RETRIES: "1"
+  SHUTDOWN_TIMEOUT: "15s"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-admin
+  namespace: moodbot
+  labels:
+    app.kubernetes.io/name: web-admin
+    app.kubernetes.io/part-of: moodbot
+    app.kubernetes.io/component: web
+spec:
+  # Две реплики: это единственный сервис, который видит пользователь,
+  # и единственный, чья недоступность заметна снаружи немедленно.
+  replicas: 2
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: web-admin
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+      labels:
+        app.kubernetes.io/name: web-admin
+        app.kubernetes.io/part-of: moodbot
+        app.kubernetes.io/component: web
+    spec:
+      terminationGracePeriodSeconds: 30
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: web-admin
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: web-admin
+          image: ghcr.io/ivanvnew75/web-admin:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: 5
+          envFrom:
+            - configMapRef:
+                name: web-admin-config
+          env:
+            - name: LINK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  # ТОТ ЖЕ Secret, что у telegram-api. Бот подписывает
+                  # ссылку, кабинет проверяет подпись — ключ обязан
+                  # совпадать, и держать его в одном месте надёжнее,
+                  # чем в двух синхронизируемых вручную.
+                  name: moodbot-link
+                  key: link-secret
+          startupProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: { path: /ready, port: http }
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 2
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 25m
+              memory: 48Mi
+            limits:
+              memory: 192Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-admin
+  namespace: moodbot
+  labels:
+    app.kubernetes.io/name: web-admin
+    app.kubernetes.io/part-of: moodbot
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: web-admin
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

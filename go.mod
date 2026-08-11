@@ -3,7 +3,8 @@ module github.com/Ivanvnew75/moodbot-next
 go 1.26.5
 
 require (
-	github.com/Ivanvnew75/libs v0.5.1
+	github.com/ClickHouse/clickhouse-go/v2 v2.48.0
+	github.com/Ivanvnew75/libs v0.6.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/labstack/echo/v4 v4.15.4
 	github.com/prometheus/client_golang v1.24.1
@@ -12,7 +13,6 @@ require (
 
 require (
 	github.com/ClickHouse/ch-go v0.74.0 // indirect
-	github.com/ClickHouse/clickhouse-go/v2 v2.48.0 // indirect
 	github.com/andybalholm/brotli v1.2.2 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
