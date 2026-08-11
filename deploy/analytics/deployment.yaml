@@ -1,0 +1,161 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: analytics
+  namespace: moodbot
+  labels:
+    app.kubernetes.io/name: analytics
+    app.kubernetes.io/part-of: moodbot
+    app.kubernetes.io/component: consumer
+spec:
+  # ОДНА реплика, в отличие от answers (две).
+  #
+  # Разница не случайна. answers — источник истины, его недоступность
+  # означает потерю ответа пользователя, поэтому две реплики.
+  # analytics — производное хранилище: если он полежит, графики отстанут,
+  # а данные никуда не денутся (они в Kafka). Вторая реплика здесь
+  # покупала бы доступность графиков ценой лишнего пода и лишних
+  # соединений к ClickHouse, который к многим соединениям не расположен.
+  replicas: 1
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: analytics
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+      labels:
+        app.kubernetes.io/name: analytics
+        app.kubernetes.io/part-of: moodbot
+        app.kubernetes.io/component: consumer
+    spec:
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: analytics
+          image: ghcr.io/ivanvnew75/analytics:0.1.3
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: 5
+          envFrom:
+            - configMapRef:
+                name: analytics-config
+          env:
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: clickhouse-analytics
+                  key: password
+          startupProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: { path: /ready, port: http }
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 2
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: analytics
+  namespace: moodbot
+  labels:
+    app.kubernetes.io/name: analytics
+    app.kubernetes.io/part-of: moodbot
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: analytics
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+# Схема ClickHouse — Job из того же образа.
+#
+# В отличие от PostgreSQL здесь нет транзакционного DDL и нет учёта
+# версий: DDL идемпотентен (IF NOT EXISTS) и безопасен к повтору.
+# Разбор компромисса — в services/analytics/schema.go.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: analytics-schema-v0-1-0
+  namespace: moodbot
+  labels:
+    app.kubernetes.io/name: analytics
+    app.kubernetes.io/component: migration
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: analytics
+        app.kubernetes.io/component: migration
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: schema
+          image: ghcr.io/ivanvnew75/analytics:0.1.3
+          imagePullPolicy: IfNotPresent
+          args: ["migrate"]
+          envFrom:
+            - configMapRef:
+                name: analytics-config
+          env:
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: clickhouse-analytics
+                  key: password
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits: { memory: 128Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
