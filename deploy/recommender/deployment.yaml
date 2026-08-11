@@ -1,0 +1,143 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: recommender-config
+  namespace: moodbot
+  labels:
+    app.kubernetes.io/name: recommender
+    app.kubernetes.io/part-of: moodbot
+data:
+  SERVER_PORT: "8080"
+  LOG_LEVEL: "info"
+  LOG_FORMAT: "json"
+  ANALYTICS_URL: "http://analytics.moodbot.svc.cluster.local"
+  REDIS_ADDR: "redis.moodbot.svc.cluster.local:6379"
+  # Отдельная логическая база Redis: scheduler держит блокировки в 0.
+  REDIS_DB: "1"
+
+  # Адрес провайдера. Меняется на прокси или локальную Ollama
+  # правкой одной строки — код не трогаем (Фактор 4).
+  LLM_BASE_URL: "https://api.openai.com/v1"
+  LLM_MODEL: "gpt-4o-mini"
+  # 20 секунд: генерация текста занимает секунды, обычные 5
+  # обрубали бы почти все ответы.
+  LLM_TIMEOUT: "20s"
+
+  # Сутки кэша. Рекомендация строится на статистике за недели —
+  # она не меняется от обновления страницы. Без кэша каждый F5
+  # в браузере стоил бы денег.
+  CACHE_TTL: "24h"
+  HTTP_TIMEOUT: "4s"
+  SHUTDOWN_TIMEOUT: "15s"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: recommender
+  namespace: moodbot
+  labels:
+    app.kubernetes.io/name: recommender
+    app.kubernetes.io/part-of: moodbot
+    app.kubernetes.io/component: api
+    # Метка для NetworkPolicy (задание 14): ТОЛЬКО этому сервису
+    # будет разрешён выход в интернет. Метка ставится сейчас, чтобы
+    # политика потом описывалась селектором, а не именем пода.
+    moodbot.io/egress: external
+spec:
+  replicas: 1
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: recommender
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+      labels:
+        app.kubernetes.io/name: recommender
+        app.kubernetes.io/part-of: moodbot
+        app.kubernetes.io/component: api
+        moodbot.io/egress: external
+    spec:
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: recommender
+          image: ghcr.io/ivanvnew75/recommender:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: 5
+          envFrom:
+            - configMapRef:
+                name: recommender-config
+          env:
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: llm-credentials
+                  key: api-key
+                  # optional: сервис обязан подниматься БЕЗ ключа
+                  # и работать на заготовленных текстах. Иначе стенд
+                  # без платного ключа собрать нельзя, а кабинет
+                  # отваливался бы целиком из-за необязательной части.
+                  optional: true
+          startupProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: { path: /ready, port: http }
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 2
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 25m
+              memory: 48Mi
+            limits:
+              memory: 192Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: recommender
+  namespace: moodbot
+  labels:
+    app.kubernetes.io/name: recommender
+    app.kubernetes.io/part-of: moodbot
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: recommender
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
