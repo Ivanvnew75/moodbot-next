@@ -1,0 +1,133 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: answers
+  namespace: moodbot
+  labels:
+    app.kubernetes.io/name: answers
+    app.kubernetes.io/part-of: moodbot
+    app.kubernetes.io/component: consumer
+spec:
+  # 2 реплики при 3 партициях. Consumer group раздаст партиции сама:
+  # одной реплике 2, другой 1. Третья реплика получила бы третью
+  # партицию, четвёртая — простаивала бы (партиций больше нет),
+  # но продолжала бы обслуживать HTTP. Это и есть потолок
+  # масштабирования потребителя, заданный числом партиций.
+  replicas: 2
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: answers
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+      labels:
+        app.kubernetes.io/name: answers
+        app.kubernetes.io/part-of: moodbot
+        app.kubernetes.io/component: consumer
+    spec:
+      # 30 секунд хватает: при SIGTERM потребитель дорабатывает текущее
+      # сообщение, коммитит offset и выходит из группы. Если убить его
+      # раньше, группа заметит уход только по session.timeout, и на это
+      # время партиции будут простаивать.
+      terminationGracePeriodSeconds: 30
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: answers
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: answers
+          image: ghcr.io/ivanvnew75/answers:0.1.1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          lifecycle:
+            preStop:
+              # Пауза перед SIGTERM: endpoints обновляются в kube-proxy
+              # асинхронно, и без неё несколько запросов уже прилетят
+              # в под, который начал завершаться.
+              sleep:
+                seconds: 5
+          envFrom:
+            - configMapRef:
+                name: answers-config
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  # Свой Secret со СВОЕЙ ролью Postgres, а не users-db.
+                  # См. scripts/bootstrap-answers-db.sh — роль answers
+                  # физически не видит таблицы сервиса users.
+                  name: answers-db
+                  key: database-url
+          startupProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: { path: /ready, port: http }
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 2
+          livenessProbe:
+            # Намеренно /health, а не /ready: liveness не должен зависеть
+            # от Postgres. Иначе недоступность базы перезапустит все поды
+            # answers, что ничем не поможет, зато устроит лавину рестартов
+            # ровно в момент аварии базы.
+            httpGet: { path: /health, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 25m
+              memory: 48Mi
+            limits:
+              # CPU-лимита нет намеренно: троттлинг Go-сервиса из-за лимита
+              # даёт всплески задержек, которые ищут неделями. Request
+              # гарантирует минимум, а от «съел весь узел» защищает
+              # request-based scheduling и лимит памяти.
+              memory: 192Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: answers
+  namespace: moodbot
+  labels:
+    app.kubernetes.io/name: answers
+    app.kubernetes.io/part-of: moodbot
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: answers
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

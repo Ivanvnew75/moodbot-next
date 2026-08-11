@@ -1,0 +1,70 @@
+---
+# Миграция схемы — Job из ТОГО ЖЕ образа, что и сервис (Фактор 12).
+#
+# Почему Job, а не initContainer у Deployment: initContainer выполнится
+# в КАЖДОЙ реплике при каждом старте пода. Две реплики = две гонки за
+# advisory lock, а при рестарте пода миграция запускается заново без
+# всякой причины. Job — разовая задача, у неё ровно эта семантика.
+#
+# Почему не отдельный образ с SQL-файлами: тогда версия схемы начинает
+# жить отдельно от версии кода, и появляется классическая беда
+# «код выкатили новый, миграции не те». Здесь .sql встроены в бинарник
+# через embed, значит образ и схема неразделимы физически.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  # Имя с версией: Job неизменяем после создания, и повторный apply
+  # с тем же именем упадёт. Версия в имени превращает это в новый Job.
+  name: answers-migrate-v0-1-0
+  namespace: moodbot
+  labels:
+    app.kubernetes.io/name: answers
+    app.kubernetes.io/component: migration
+spec:
+  # Ограничение попыток. Без него неверная миграция будет
+  # перезапускаться шесть раз (дефолт), каждый раз падая на том же месте.
+  backoffLimit: 2
+  # Job удалится сам через сутки после завершения. Иначе завершённые
+  # Job копятся в namespace и мешают смотреть kubectl get pods.
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: answers
+        app.kubernetes.io/component: migration
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          image: ghcr.io/ivanvnew75/answers:0.1.0
+          imagePullPolicy: IfNotPresent
+          args: ["migrate"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: answers-db
+                  key: database-url
+            # KAFKA_BROKERS обязателен по конфигу сервиса, хотя миграции
+            # он не нужен. Это цена одного бинарника на все режимы:
+            # конфигурация валидируется целиком на старте. Альтернатива —
+            # делать проверку зависимой от подкоманды — усложнила бы
+            # config ради одного случая.
+            - name: KAFKA_BROKERS
+              value: "moodbot-kafka-kafka-bootstrap.moodbot.svc:9092"
+            - name: LOG_FORMAT
+              value: "json"
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits: { memory: 128Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
