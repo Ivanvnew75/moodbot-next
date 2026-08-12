@@ -40,6 +40,17 @@ func main() {
 	logger.Info("starting", slog.String("commit", commit),
 		slog.Bool("secure_cookie", cfg.SecureCookie))
 
+	// Громкое предупреждение вместо тихого флага.
+	//
+	// SECURE_COOKIE=false — законная настройка для dev и дыра для prod:
+	// сессионная кука уйдёт по незашифрованному соединению. Настройка,
+	// которую можно включить незаметно, рано или поздно оказывается
+	// включённой в проде. Строка WARN в логе делает это видимым
+	// и в kubectl logs, и в Loki.
+	if !cfg.SecureCookie {
+		logger.Warn("СЕССИОННАЯ КУКА БЕЗ ФЛАГА Secure — допустимо только в dev по HTTP")
+	}
+
 	ctx, stop := common.SignalContext()
 	defer stop()
 

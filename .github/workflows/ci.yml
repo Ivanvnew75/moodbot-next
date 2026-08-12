@@ -1,0 +1,195 @@
+# Проверки качества и безопасности кода.
+#
+# ЧТО ЗДЕСЬ ГЛАВНОЕ, ПОМИМО НАБОРА ИНСТРУМЕНТОВ.
+#
+# 1. Каждый сканер отвечает на СВОЙ вопрос. Складывать их в одну кучу
+#    «потому что security» бессмысленно — они находят разные классы
+#    проблем и по-разному врут:
+#
+#      gofmt/vet/staticcheck — корректность и стиль, почти без ложных
+#      gosec                 — опасные конструкции В НАШЕМ коде (SAST)
+#      govulncheck           — уязвимости в зависимостях, ДОСТИЖИМЫЕ из кода
+#      trivy fs              — уязвимости зависимостей + конфигурации
+#      trivy image           — уязвимости базового образа
+#      gitleaks              — секреты в коде и в ИСТОРИИ git
+#
+# 2. Пайплайн ПАДАЕТ на находках, а не «сообщает». Проверка, которая
+#    только пишет в лог, через месяц никем не читается. Уровень падения
+#    выбран осознанно и объяснён у каждого шага.
+#
+# 3. Подавления живут в .trivyignore и в комментариях `#nosec`
+#    С ОБОСНОВАНИЕМ. Глобально отключённое правило — это правило,
+#    про которое через полгода никто не вспомнит, почему оно отключено.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Права по умолчанию — только чтение.
+#
+# Токен GITHUB_TOKEN по умолчанию имеет широкие права на запись
+# в репозиторий. Публичный репозиторий + сторонние действия = чужой код
+# с правом писать в наш репозиторий. Минимальные права здесь, точечное
+# расширение в конкретной job — стандартная защита от supply chain.
+permissions:
+  contents: read
+
+# Отменять предыдущий запуск на той же ветке: смысла гонять сканеры
+# на устаревшем коммите нет, а очередь занимает.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.26"
+
+jobs:
+  quality:
+    name: Форматирование, vet, staticcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: gofmt
+        run: |
+          # gofmt -l печатает имена НЕотформатированных файлов и всегда
+          # выходит с кодом 0. Без явной проверки вывода шаг никогда
+          # не упадёт — типовая ошибка в пайплайнах с gofmt.
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "Не отформатированы:"; echo "$unformatted"; exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: staticcheck
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          staticcheck ./...
+
+  sast:
+    name: SAST (gosec)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: "1.26", cache: true }
+
+      - name: gosec
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
+          # -exclude-generated: сгенерированный код правит генератор,
+          #   а не человек, и находки в нём — шум.
+          # Порог не занижаем: MEDIUM у gosec — это, например, кука
+          #   без Secure. Такое чинят, а не откладывают.
+          gosec -exclude-generated -severity medium ./...
+
+  sca:
+    name: SCA (govulncheck, trivy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: "1.26", cache: true }
+
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          # govulncheck точнее обычных SCA: он падает только если
+          # уязвимая функция РЕАЛЬНО достижима из нашего кода.
+          # Разница огромна на практике — типичный SCA даёт десятки
+          # «уязвимостей» в коде, который никогда не выполняется,
+          # и команда перестаёт читать отчёты.
+          govulncheck ./...
+
+      - name: trivy — зависимости
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true   # без исправления падать нечем, это шум
+
+  secrets:
+    name: Секреты в коде и истории
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # ВСЯ история, а не последний коммит.
+          #
+          # Секрет, добавленный и удалённый следующим коммитом, остаётся
+          # в истории навсегда и извлекается одной командой. Проверять
+          # только рабочее дерево — значит не находить ровно тот случай,
+          # ради которого проверка и нужна.
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  manifests:
+    name: Манифесты Kubernetes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Рендер оверлеев
+        run: |
+          # СКАНИРУЕМ ОТРЕНДЕРЕННЫЙ ВЫВОД, А НЕ БАЗУ KUSTOMIZE.
+          #
+          # База намеренно не содержит namespace — его задаёт оверлей.
+          # Сканер базы честно сообщает «Workloads in the default
+          # namespace» для каждого объекта. Это ложные срабатывания,
+          # порождённые способом хранения конфигурации, а не самой
+          # конфигурацией. Проверено локально: на отрендеренном
+          # оверлее это предупреждение исчезает.
+          #
+          # Правило общее: проверять надо то, что поедет в кластер.
+          kubectl kustomize deploy/overlays/prod > rendered-prod.yaml
+          kubectl kustomize deploy/overlays/dev  > rendered-dev.yaml
+
+      - name: trivy config
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: config
+          scan-ref: rendered-prod.yaml
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+
+  build:
+    name: Сборка и скан образа
+    runs-on: ubuntu-latest
+    needs: [quality, sast, sca]
+    strategy:
+      # fail-fast: false — хотим видеть результат по ВСЕМ сервисам,
+      # а не останавливаться на первом упавшем. Иначе после починки
+      # одного вылезает следующий, и так по одному за прогон.
+      fail-fast: false
+      matrix:
+        service: [answers, analytics, web-admin, recommender]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Сборка
+        run: |
+          docker build \
+            --build-arg SERVICE=${{ matrix.service }} \
+            --build-arg VERSION=ci-${{ github.sha }} \
+            --build-arg COMMIT=${{ github.sha }} \
+            -t ${{ matrix.service }}:ci .
+
+      - name: trivy — образ
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ matrix.service }}:ci
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true

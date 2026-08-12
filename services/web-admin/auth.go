@@ -34,6 +34,16 @@ func handleLogin(secret []byte, sessionTTL time.Duration, secureCookie bool, log
 				"Попросите бота выдать новую: отправьте /kabinet в чат."))
 		}
 
+		// #nosec G124 -- Secure берётся из конфигурации осознанно.
+		//
+		// gosec справедливо предупреждает: он видит переменную вместо
+		// литерала true и не может доказать, что флаг выставлен.
+		// Подавляем не потому, что находка ложная, а потому что
+		// поведение задокументировано и ограничено: SECURE_COOKIE=false
+		// допустим ТОЛЬКО в dev, где кабинет открывается по HTTP
+		// (браузер не сохранит Secure-куку с http://). При старте
+		// с этим значением сервис пишет предупреждение в лог —
+		// см. main.go, чтобы значение нельзя было включить незаметно.
 		c.SetCookie(&http.Cookie{
 			Name:  sessionCookie,
 			Value: authlink.Sign(secret, authlink.PurposeSession, userID, sessionTTL),
@@ -93,6 +103,7 @@ func unauthorized(c echo.Context) error {
 
 func handleLogout(secureCookie bool) echo.HandlerFunc {
 	return func(c echo.Context) error {
+		// #nosec G124 -- та же причина, что в handleLogin выше.
 		c.SetCookie(&http.Cookie{
 			Name: sessionCookie, Value: "", Path: "/",
 			HttpOnly: true, Secure: secureCookie,

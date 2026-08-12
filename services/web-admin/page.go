@@ -155,6 +155,17 @@ func renderChart(points []DailyPoint) template.HTML {
 		w-pad, h-6, template.HTMLEscapeString(points[len(points)-1].Date))
 	b.WriteString(`</svg>`)
 
+	// #nosec G203 -- в эту строку не попадает пользовательский ввод.
+	//
+	// gosec прав в общем случае: template.HTML отключает экранирование,
+	// и это опасный тип. Здесь SVG собирается из чисел, посчитанных
+	// на сервере (координаты, средние оценки), а единственные строки —
+	// даты формата YYYY-MM-DD из ClickHouse — дополнительно проходят
+	// через template.HTMLEscapeString выше.
+	//
+	// Инвариант, который нужно удержать при правках: если сюда
+	// когда-нибудь попадёт текст ответа пользователя, подавление
+	// обязано быть снято, а SVG — собран через шаблон.
 	return template.HTML(b.String())
 }
 

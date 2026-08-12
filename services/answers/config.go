@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -52,6 +53,21 @@ func loadConfig() (Config, error) {
 	maxConns, err := common.EnvInt("DB_MAX_CONNS", 5)
 	if err != nil {
 		return c, err
+	}
+	// Проверка границ перед сужением типа.
+	//
+	// Нашёл gosec (G115: integer overflow conversion int -> int32).
+	// Находка настоящая: int32(maxConns) при DB_MAX_CONNS=3000000000
+	// даёт ОТРИЦАТЕЛЬНОЕ число, и пул соединений создаётся с абсурдным
+	// размером. Само по себе это не уязвимость — переменную задаём мы, —
+	// но это ровно тот класс ошибок, из-за которого опечатка в ConfigMap
+	// превращается в необъяснимое поведение в проде.
+	//
+	// Верхняя граница 100 не с потолка: у PostgreSQL по умолчанию
+	// max_connections=100, и пул больше этого числа бессмыслен —
+	// он лишь переносит отказ с приложения на базу.
+	if maxConns < 1 || maxConns > 100 {
+		return c, fmt.Errorf("DB_MAX_CONNS: ожидается 1..100, получено %d", maxConns)
 	}
 	c.DBMaxConns = int32(maxConns)
 
