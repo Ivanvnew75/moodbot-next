@@ -15,7 +15,7 @@ kind: Job
 metadata:
   # Имя с версией: Job неизменяем после создания, и повторный apply
   # с тем же именем упадёт. Версия в имени превращает это в новый Job.
-  name: answers-migrate-v0-1-0
+  name: answers-migrate-v0-2-0
   labels:
     app.kubernetes.io/name: answers
     app.kubernetes.io/component: migration
@@ -41,8 +41,8 @@ spec:
           type: RuntimeDefault
       containers:
         - name: migrate
-          image: ghcr.io/ivanvnew75/answers:0.1.0
-          imagePullPolicy: IfNotPresent
+          image: ghcr.io/ivanvnew75/answers:0.2.0
+          imagePullPolicy: IfNotPresent   # digest подставит Kyverno, тянем из GHCR
           args: ["migrate"]
           env:
             - name: DATABASE_URL

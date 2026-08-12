@@ -46,8 +46,8 @@ spec:
           type: RuntimeDefault
       containers:
         - name: analytics
-          image: ghcr.io/ivanvnew75/analytics:0.1.3
-          imagePullPolicy: IfNotPresent
+          image: ghcr.io/ivanvnew75/analytics:0.2.0
+          imagePullPolicy: IfNotPresent   # digest подставит Kyverno, тянем из GHCR
           ports:
             - name: http
               containerPort: 8080
@@ -114,7 +114,7 @@ spec:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: analytics-schema-v0-1-0
+  name: analytics-schema-v0-2-0
   labels:
     app.kubernetes.io/name: analytics
     app.kubernetes.io/component: migration
@@ -136,8 +136,8 @@ spec:
           type: RuntimeDefault
       containers:
         - name: schema
-          image: ghcr.io/ivanvnew75/analytics:0.1.3
-          imagePullPolicy: IfNotPresent
+          image: ghcr.io/ivanvnew75/analytics:0.2.0
+          imagePullPolicy: IfNotPresent   # digest подставит Kyverno, тянем из GHCR
           args: ["migrate"]
           envFrom:
             - configMapRef:
