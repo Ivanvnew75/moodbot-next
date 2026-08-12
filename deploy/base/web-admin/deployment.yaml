@@ -94,7 +94,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: web-admin
-          image: ghcr.io/ivanvnew75/web-admin:0.3.1@sha256:e7b2c87aa71b58419d10e436749c5280230f0ebdd50f380f6075efa87002e686
+          image: ghcr.io/ivanvnew75/web-admin:0.5.0@sha256:18d3b0f5ea2307e09601c184a45f709c1e199d492d73af1dbbdde61dd00047c6
           imagePullPolicy: IfNotPresent   # digest подставит Kyverno, тянем из GHCR
           ports:
             - name: http
