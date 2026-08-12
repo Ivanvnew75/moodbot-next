@@ -66,7 +66,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: analytics
-          image: ghcr.io/ivanvnew75/analytics:0.2.0@sha256:9c8cdc470cbac4075bdc342523a0282516d3ea29f3967a401d27b11db7b29bab
+          image: ghcr.io/ivanvnew75/analytics:0.4.0@sha256:6b1ab09d0c43d177b9f6f46e777f8750df483a8df98d3ff2027f35f30429d2e5
           imagePullPolicy: IfNotPresent   # digest подставит Kyverno, тянем из GHCR
           ports:
             - name: http
@@ -177,7 +177,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: schema
-          image: ghcr.io/ivanvnew75/analytics:0.2.0@sha256:9c8cdc470cbac4075bdc342523a0282516d3ea29f3967a401d27b11db7b29bab
+          image: ghcr.io/ivanvnew75/analytics:0.4.0@sha256:6b1ab09d0c43d177b9f6f46e777f8750df483a8df98d3ff2027f35f30429d2e5
           imagePullPolicy: IfNotPresent   # digest подставит Kyverno, тянем из GHCR
           args: ["migrate"]
           envFrom:

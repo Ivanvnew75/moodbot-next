@@ -49,7 +49,7 @@ spec:
     metadata:
       annotations:
         prometheus.io/scrape: "true"
-        prometheus.io/port: "8080"
+        prometheus.io/port: "9090"
         prometheus.io/path: "/metrics"
       labels:
         app.kubernetes.io/name: web-admin
@@ -99,6 +99,10 @@ spec:
           ports:
             - name: http
               containerPort: 8080
+            # Метрики на отдельном порту: через Ingress наружу
+            # проброшен только http, а metrics остаётся внутри кластера.
+            - name: metrics
+              containerPort: 9090
           lifecycle:
             preStop:
               sleep:
@@ -157,3 +161,6 @@ spec:
     - name: http
       port: 80
       targetPort: http
+    - name: metrics
+      port: 9090
+      targetPort: metrics

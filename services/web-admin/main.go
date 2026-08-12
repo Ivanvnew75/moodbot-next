@@ -82,7 +82,19 @@ func main() {
 		),
 	}))
 
-	metrics.Register(e)
+	// /metrics НЕ регистрируется на общем маршрутизаторе.
+	//
+	// НАЙДЕНО СОБСТВЕННЫМ ПЕНТЕСТОМ (задание 17): эндпоинт отдавался
+	// из интернета с кодом 200. Утечки персональных данных там нет,
+	// но раскрываются версия Go, число горутин, потребление памяти,
+	// счётчики запросов по маршрутам и код версии сервиса — то есть
+	// готовая карта для планирования атаки и наблюдения за её эффектом
+	// в реальном времени.
+	//
+	// Метрики нужны Prometheus, который ходит ИЗНУТРИ кластера.
+	// Значит их место — на отдельном порту, недоступном через Ingress.
+	// Разделение по портам надёжнее, чем правило на ingress: оно
+	// не зависит от того, не забыл ли кто-то это правило.
 	e.GET("/health", func(c echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
 	})
@@ -127,7 +139,21 @@ func main() {
 		return c.JSON(http.StatusOK, sm)
 	})
 
+	// Отдельный сервер метрик на 9090 — только для Prometheus.
+	metricsSrv := echo.New()
+	metricsSrv.HideBanner = true
+	metricsSrv.HidePort = true
+	metrics.Register(metricsSrv)
+
 	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := metricsSrv.Start(":9090"); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Error("metrics server failed", slog.String("error", err.Error()))
+		}
+	}()
+
 	wg.Add(1)
 	go func() {
 		defer wg.Done()

@@ -55,7 +55,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: migrate
-          image: ghcr.io/ivanvnew75/answers:0.2.0@sha256:ed6a5d436464ad4ff7c29b60376305c6893fcb54f0505976b5d8ca4101e79432
+          image: ghcr.io/ivanvnew75/answers:0.4.0@sha256:413e43e49f9c60764fcb4c481d4f3b371aeb1d0532d2da78c01fa7c4ece97941
           imagePullPolicy: IfNotPresent   # digest подставит Kyverno, тянем из GHCR
           args: ["migrate"]
           env:
