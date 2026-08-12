@@ -97,6 +97,14 @@ func main() {
 		return c.JSON(http.StatusOK, map[string]string{"status": "ready"})
 	})
 
+	// Стили отдельным ресурсом — см. разбор в page.go.
+	// Доступны БЕЗ сессии: это публичная статика, и требовать на неё
+	// авторизацию значило бы отдавать неоформленную страницу входа.
+	e.GET("/style.css", func(c echo.Context) error {
+		c.Response().Header().Set("Cache-Control", "public, max-age=3600")
+		return c.Blob(http.StatusOK, "text/css; charset=utf-8", []byte(styleCSS))
+	})
+
 	secret := []byte(cfg.LinkSecret)
 	e.GET("/login", handleLogin(secret, cfg.SessionTTL, cfg.SecureCookie, logger))
 	e.GET("/logout", handleLogout(cfg.SecureCookie))
@@ -199,15 +207,16 @@ func securityHeaders() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			h := c.Response().Header()
-			// CSP без 'unsafe-inline' для скриптов: на странице нет
-			// ни одного <script>, и это проверяемое свойство.
-			// Инлайновые СТИЛИ разрешены — style-src 'unsafe-inline' —
-			// потому что <style> в шапке страницы есть. Это осознанное
-			// послабление: инлайновый стиль опаснее скрипта в разы
-			// меньше, а вынос CSS в отдельный файл добавил бы
-			// статику и раздачу файлов ради одного правила.
+			// CSP БЕЗ 'unsafe-inline' вообще — ни для скриптов, ни для стилей.
+			//
+			// Скриптов на странице нет ни одного, это проверяемое свойство.
+			// Инлайновые стили сначала были разрешены с формулировкой
+			// «вынос CSS ради одного правила не стоит того». DAST показал,
+			// что стоит: правило ZAP 10055. Стили переехали в /style.css,
+			// атрибуты style="" стали классами, и из политики ушёл целый
+			// класс разрешений. Цена — один дополнительный маршрут.
 			h.Set("Content-Security-Policy",
-				"default-src 'none'; style-src 'self' 'unsafe-inline'; "+
+				"default-src 'none'; style-src 'self'; "+
 					"img-src 'self' data:; form-action 'self'; "+
 					"base-uri 'none'; frame-ancestors 'none'")
 			// Запрет вставки страницы в чужой iframe — защита
@@ -219,6 +228,23 @@ func securityHeaders() echo.MiddlewareFunc {
 			// уехал бы в заголовке Referer на любой внешний сайт.
 			h.Set("Referrer-Policy", "no-referrer")
 			h.Set("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+
+			// Изоляция от чужих страниц. Нашёл DAST (правило 90004).
+			// COOP разрывает связь window.opener с открывшей нас
+			// вкладкой, CORP запрещает встраивать наши ответы
+			// в чужие документы. Обе директивы бесплатны и закрывают
+			// класс атак через кросс-оконное взаимодействие.
+			h.Set("Cross-Origin-Opener-Policy", "same-origin")
+			h.Set("Cross-Origin-Resource-Policy", "same-origin")
+
+			// Страница содержит данные о самочувствии человека.
+			// Без явного запрета она может осесть в кэше браузера
+			// и в кэше промежуточного прокси — и остаться доступной
+			// следующему, кто сядет за тот же компьютер.
+			// Нашёл DAST (правило 10049 «Non-Storable Content»).
+			if c.Path() != "/style.css" {
+				h.Set("Cache-Control", "no-store")
+			}
 			return next(c)
 		}
 	}

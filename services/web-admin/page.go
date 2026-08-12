@@ -30,27 +30,7 @@ var pageTmpl = template.Must(template.New("page").Parse(`
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MoodBot — мой кабинет</title>
-<style>
-  :root { color-scheme: light dark; }
-  body { font-family: system-ui, sans-serif; max-width: 780px; margin: 0 auto;
-         padding: 24px 16px 64px; line-height: 1.5; }
-  h1 { font-size: 1.4rem; margin-bottom: 4px; }
-  .muted { opacity: .7; font-size: .9rem; }
-  .cards { display: flex; flex-wrap: wrap; gap: 12px; margin: 20px 0; }
-  .card { flex: 1 1 150px; border: 1px solid rgba(128,128,128,.35);
-          border-radius: 10px; padding: 12px 14px; }
-  .card .v { font-size: 1.6rem; font-weight: 600; }
-  .rec { border-left: 3px solid #6c8ebf; padding: 10px 14px; margin: 20px 0;
-         background: rgba(128,128,128,.08); border-radius: 0 8px 8px 0; }
-  table { border-collapse: collapse; width: 100%; margin-top: 12px; }
-  td, th { text-align: left; padding: 6px 8px; border-bottom: 1px solid rgba(128,128,128,.25);
-           vertical-align: top; }
-  th { font-weight: 600; font-size: .85rem; opacity: .8; }
-  svg { max-width: 100%; height: auto; }
-  .err { color: #b23; font-size: .9rem; }
-  footer { margin-top: 40px; font-size: .85rem; opacity: .7; }
-  a { color: inherit; }
-</style>
+<link rel="stylesheet" href="/style.css">
 </head>
 <body>
   <h1>Мой кабинет</h1>
@@ -73,10 +53,10 @@ var pageTmpl = template.Must(template.New("page").Parse(`
   <p class="err">Рекомендации сейчас недоступны — остальное работает.</p>
   {{end}}
 
-  <h2 style="font-size:1.1rem">Динамика</h2>
+  <h2 class="sec">Динамика</h2>
   {{if .Chart}}{{.Chart}}{{else}}<p class="muted">Данных для графика пока мало.</p>{{end}}
 
-  <h2 style="font-size:1.1rem">Последние ответы</h2>
+  <h2 class="sec">Последние ответы</h2>
   {{if .Answers}}
   <table>
     <tr><th>Когда</th><th>Вопрос</th><th>Ответ</th></tr>
@@ -98,6 +78,42 @@ var pageTmpl = template.Must(template.New("page").Parse(`
 </body>
 </html>
 `))
+
+// styleCSS — стили ОТДЕЛЬНЫМ ресурсом, а не тегом <style>.
+//
+// Причина не косметическая. Инлайновые стили требуют в CSP директивы
+// style-src 'unsafe-inline', а она разрешает браузеру исполнять ЛЮБОЙ
+// стиль со страницы — включая внедрённый атакующим. Через CSS можно
+// вытащить данные (селекторы по значению атрибута + background-image
+// с адресом атакующего) и подделать интерфейс поверх настоящего.
+//
+// Нашёл DAST (ZAP, правило 10055 «CSP: style-src unsafe-inline»).
+// Формально это предупреждение, а не уязвимость, но убирается оно
+// дёшево: один дополнительный маршрут — и из CSP уходит целый класс
+// разрешений. Заодно пришлось убрать атрибуты style="" из разметки:
+// они блокируются той же директивой.
+const styleCSS = `
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, sans-serif; max-width: 780px; margin: 0 auto;
+         padding: 24px 16px 64px; line-height: 1.5; }
+  h1 { font-size: 1.4rem; margin-bottom: 4px; }
+  .muted { opacity: .7; font-size: .9rem; }
+  .cards { display: flex; flex-wrap: wrap; gap: 12px; margin: 20px 0; }
+  .card { flex: 1 1 150px; border: 1px solid rgba(128,128,128,.35);
+          border-radius: 10px; padding: 12px 14px; }
+  .card .v { font-size: 1.6rem; font-weight: 600; }
+  .rec { border-left: 3px solid #6c8ebf; padding: 10px 14px; margin: 20px 0;
+         background: rgba(128,128,128,.08); border-radius: 0 8px 8px 0; }
+  table { border-collapse: collapse; width: 100%; margin-top: 12px; }
+  td, th { text-align: left; padding: 6px 8px; border-bottom: 1px solid rgba(128,128,128,.25);
+           vertical-align: top; }
+  th { font-weight: 600; font-size: .85rem; opacity: .8; }
+  svg { max-width: 100%; height: auto; }
+  .err { color: #b23; font-size: .9rem; }
+  footer { margin-top: 40px; font-size: .85rem; opacity: .7; }
+  a { color: inherit; }
+  .sec { font-size: 1.1rem; }
+`
 
 type pageData struct {
 	Summary        Summary
@@ -177,7 +193,7 @@ func pageMessage(title, text string) string {
 	return `<!doctype html><html lang="ru"><head><meta charset="utf-8">` +
 		`<meta name="viewport" content="width=device-width, initial-scale=1">` +
 		`<title>` + template.HTMLEscapeString(title) + `</title>` +
-		`<style>body{font-family:system-ui,sans-serif;max-width:520px;margin:80px auto;padding:0 16px;line-height:1.5}</style>` +
-		`</head><body><h1 style="font-size:1.3rem">` + template.HTMLEscapeString(title) + `</h1>` +
+		`<link rel="stylesheet" href="/style.css">` +
+		`</head><body><h1 class="msg">` + template.HTMLEscapeString(title) + `</h1>` +
 		`<p>` + template.HTMLEscapeString(text) + `</p></body></html>`
 }
