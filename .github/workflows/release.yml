@@ -1,0 +1,126 @@
+# Сборка, публикация и ПОДПИСЬ образов.
+#
+# ПОЧЕМУ KEYLESS-ПОДПИСЬ, А НЕ ПАРА КЛЮЧЕЙ.
+#
+# Классический cosign требует приватный ключ. Его надо где-то хранить
+# (секрет в GitHub), кому-то ротировать, и — главное — он даёт ответ
+# на вопрос «подписано этим ключом», но не на вопрос «кем и откуда».
+# Утёкший ключ подписывает что угодно, и отличить это невозможно.
+#
+# Keyless (Sigstore) переворачивает задачу. Подпись делается эфемерным
+# ключом, который живёт секунды, а личность подтверждается OIDC-токеном
+# GitHub Actions: в сертификате Fulcio оказывается ИМЕННО ЭТОТ
+# репозиторий, ИМЕННО этот workflow и ИМЕННО этот коммит. Факт подписи
+# попадает в публичный журнал прозрачности Rekor.
+#
+# Практическое следствие: политика в кластере проверяет не «есть подпись»,
+# а «подписано workflow release.yml из репозитория Ivanvnew75/moodbot-next».
+# Укравший что угодно из CI не сможет подписать образ от чужого имени,
+# потому что подписывать нечем — ключа не существует.
+#
+# Цена: зависимость от доступности Fulcio и Rekor при подписи и проверке.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Версия образов (например 0.2.0)"
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # packages: write — публикация в GHCR.
+      packages: write
+      # id-token: write — САМОЕ ВАЖНОЕ ПРАВО ЗДЕСЬ.
+      # Оно позволяет job получить OIDC-токен GitHub, которым cosign
+      # доказывает Fulcio свою личность. Без него keyless-подпись
+      # невозможна в принципе, а сообщение об ошибке будет про
+      # «failed to get ID token» и не наведёт на мысль о permissions.
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [answers, analytics, web-admin, recommender]
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Определить версию
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Сборка и публикация
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          build-args: |
+            SERVICE=${{ matrix.service }}
+            VERSION=${{ steps.ver.outputs.version }}
+            COMMIT=${{ github.sha }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.service }}:${{ steps.ver.outputs.version }}
+          # provenance/sbom выключены: они добавляют в манифест
+          # дополнительные артефакты, из-за которых образ становится
+          # индексом, и `cosign verify` по тегу начинает вести себя
+          # неочевидно. Подпись делаем по digest — см. следующий шаг.
+          provenance: false
+          sbom: false
+
+      - uses: sigstore/cosign-installer@v3
+
+      - name: Подпись образа
+        run: |
+          # ПОДПИСЫВАЕМ ПО DIGEST, А НЕ ПО ТЕГУ.
+          #
+          # Тег — изменяемая ссылка: подписав ghcr.io/.../answers:0.2.0,
+          # мы подписываем «то, на что тег указывает сейчас». Перезапись
+          # тега делает подпись бессмысленной, а проверка при этом
+          # продолжает проходить — для СТАРОГО образа.
+          # Digest неизменяем, подпись привязана к конкретным байтам.
+          cosign sign --yes \
+            "${REGISTRY}/${{ github.repository_owner }}/${{ matrix.service }}@${{ steps.build.outputs.digest }}"
+
+      - name: Проверка собственной подписи
+        run: |
+          # Проверяем сразу же и в пайплайне.
+          #
+          # Иначе о неработающей подписи узнаёшь в момент, когда политика
+          # в кластере отвергает выкатку, — то есть в худший момент.
+          # Здесь же проверяются те самые условия, которые потом
+          # проверяет Kyverno: идентичность и издатель.
+          cosign verify \
+            --certificate-identity-regexp "^https://github.com/${{ github.repository }}/.github/workflows/release.yml@.*" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "${REGISTRY}/${{ github.repository_owner }}/${{ matrix.service }}@${{ steps.build.outputs.digest }}"
+
+      - name: Итог
+        run: |
+          echo "### ${{ matrix.service }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "digest: \`${{ steps.build.outputs.digest }}\`" >> "$GITHUB_STEP_SUMMARY"
