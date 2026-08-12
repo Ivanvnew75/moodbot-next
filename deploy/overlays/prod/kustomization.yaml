@@ -1,0 +1,21 @@
+---
+# Оверлей prod — то, что уже работает в namespace moodbot.
+#
+# ПОЧЕМУ ОН ПОЧТИ ПУСТОЙ, И ЭТО ХОРОШО.
+# База описывает боевую конфигурацию, а оверлей prod только называет
+# namespace. Обратный подход — «база = минимальный dev, prod надстраивает» —
+# ведёт к тому, что боевые значения живут в оверлее и в базе никогда
+# не проверяются. Пусть отличается dev: его отличия видны в одном файле
+# и их список сам по себе документ.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: moodbot
+
+resources:
+  - ../../base
+
+labels:
+  - includeSelectors: false
+    pairs:
+      app.kubernetes.io/environment: prod

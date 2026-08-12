@@ -16,7 +16,6 @@ metadata:
   # Имя с версией: Job неизменяем после создания, и повторный apply
   # с тем же именем упадёт. Версия в имени превращает это в новый Job.
   name: answers-migrate-v0-1-0
-  namespace: moodbot
   labels:
     app.kubernetes.io/name: answers
     app.kubernetes.io/component: migration
@@ -57,7 +56,7 @@ spec:
             # делать проверку зависимой от подкоманды — усложнила бы
             # config ради одного случая.
             - name: KAFKA_BROKERS
-              value: "moodbot-kafka-kafka-bootstrap.moodbot.svc:9092"
+              value: "moodbot-kafka-kafka-bootstrap:9092"
             - name: LOG_FORMAT
               value: "json"
           resources:

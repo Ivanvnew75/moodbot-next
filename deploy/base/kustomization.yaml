@@ -1,0 +1,23 @@
+---
+# База: описание сервисов БЕЗ привязки к окружению.
+#
+# Здесь нет ни namespace, ни числа реплик, ни адресов конкретного
+# кластера — всё это задают оверлеи. Правило простое: если значение
+# отличается между dev и prod, ему не место в базе.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - answers
+  - analytics
+  - web-admin
+  - recommender
+
+labels:
+  # includeSelectors: false — метки для навигации не должны попадать
+  # в selector Deployment: selector неизменяем после создания, и любая
+  # правка меток сломала бы выкатку.
+  - includeSelectors: false
+    pairs:
+      app.kubernetes.io/managed-by: kustomize
+      app.kubernetes.io/part-of: moodbot

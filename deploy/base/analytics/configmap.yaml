@@ -3,7 +3,6 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: analytics-config
-  namespace: moodbot
   labels:
     app.kubernetes.io/name: analytics
     app.kubernetes.io/part-of: moodbot
@@ -11,7 +10,7 @@ data:
   SERVER_PORT: "8080"
   LOG_LEVEL: "info"
   LOG_FORMAT: "json"
-  KAFKA_BROKERS: "moodbot-kafka-kafka-bootstrap.moodbot.svc:9092"
+  KAFKA_BROKERS: "moodbot-kafka-kafka-bootstrap:9092"
   # СВОЯ consumer group, отличная от answers-writer.
   # Именно разные группы дают fan-out: каждый потребитель ведёт
   # собственный offset и читает ВСЕ сообщения топика. Одна группа
@@ -19,7 +18,7 @@ data:
   # половина ответов попала бы только в Postgres, половина только
   # в ClickHouse. Это типовая ошибка при первом знакомстве с Kafka.
   KAFKA_GROUP: "analytics-writer"
-  CLICKHOUSE_ADDR: "clickhouse.moodbot.svc.cluster.local:9000"
+  CLICKHOUSE_ADDR: "clickhouse:9000"
   CLICKHOUSE_DB: "moodbot"
   CLICKHOUSE_USER: "analytics"
   CLICKHOUSE_TLS: "false"

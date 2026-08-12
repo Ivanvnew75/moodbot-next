@@ -3,7 +3,6 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: answers-config
-  namespace: moodbot
   labels:
     app.kubernetes.io/name: answers
     app.kubernetes.io/part-of: moodbot
@@ -16,7 +15,7 @@ data:
   # Полное имя с .svc, а не короткое: короткое имя разрешается через
   # search-домены resolv.conf, и в другом namespace тот же манифест
   # молча подключился бы к чужой Kafka.
-  KAFKA_BROKERS: "moodbot-kafka-kafka-bootstrap.moodbot.svc:9092"
+  KAFKA_BROKERS: "moodbot-kafka-kafka-bootstrap:9092"
 
   # Имя consumer group. Вынесено в ConfigMap не ради красоты:
   # смена имени группы — штатный способ ПЕРЕИГРАТЬ топик с начала.

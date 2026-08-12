@@ -1,0 +1,94 @@
+---
+# Оверлей dev — тот же стек в namespace dev.
+#
+# ЧТО ТАКОЕ DEV/PROD PARITY НА САМОМ ДЕЛЕ (Фактор 10).
+# Не «одинаковые окружения» — одинаковыми они не бывают, у dev меньше
+# железа и меньше данных. Parity — это про то, что различия ЯВНЫЕ
+# и ограничены количественными параметрами. Ниже полный список отличий
+# dev от prod, и он умещается в экран: namespace, число реплик,
+# уровень логирования. Ни одного отличия по КОМПОНЕНТАМ: та же Kafka,
+# тот же ClickHouse, тот же PostgreSQL, те же образы.
+#
+# Отличие по компонентам — это то, из-за чего «на моей машине работало»:
+# SQLite в dev против PostgreSQL в prod, память вместо Redis, заглушка
+# вместо очереди. Здесь такого нет ни одного.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: dev
+
+resources:
+  - ../../base
+
+labels:
+  - includeSelectors: false
+    pairs:
+      app.kubernetes.io/environment: dev
+
+# Отличие 1: по одной реплике.
+#
+# Это КОЛИЧЕСТВЕННОЕ отличие, и оно допустимо. Но у него есть цена,
+# о которой надо помнить: в dev не воспроизводятся проблемы, которые
+# бывают только при нескольких репликах — гонки за общий ресурс,
+# распределение партиций Kafka между потребителями, залипание сессии
+# на конкретном поде. Если ловим такое, replicas в dev поднимаем
+# временно до prod-значения.
+replicas:
+  - name: answers
+    count: 1
+  - name: web-admin
+    count: 1
+
+patches:
+  # Отличие 2: подробный лог.
+  #
+  # Патч через configMapGenerator был бы «правильнее» по kustomize,
+  # но он порождает ConfigMap с хешем в имени, а на него ссылаются
+  # Deployment'ы по фиксированному имени. Точечный patch проще
+  # и не создаёт лишней связности.
+  - target:
+      kind: ConfigMap
+      name: answers-config
+    patch: |
+      - op: replace
+        path: /data/LOG_LEVEL
+        value: debug
+  - target:
+      kind: ConfigMap
+      name: analytics-config
+    patch: |
+      - op: replace
+        path: /data/LOG_LEVEL
+        value: debug
+  - target:
+      kind: ConfigMap
+      name: web-admin-config
+    patch: |
+      - op: replace
+        path: /data/LOG_LEVEL
+        value: debug
+      # Отличие 3: кука без флага Secure.
+      #
+      # В dev кабинет открывается по http://moodbot-dev.local, а браузер
+      # НЕ СОХРАНЯЕТ куку с флагом Secure, полученную по HTTP. Без этой
+      # правки вход в dev выглядел бы как «молча не работает»: сервер
+      # ставит куку, браузер её выбрасывает, и никакой ошибки нигде нет.
+      #
+      # Это ровно тот случай, когда отличие окружений ОБЯЗАНО быть
+      # в конфиге, а не в коде: значение продиктовано транспортом,
+      # а не логикой приложения.
+      - op: replace
+        path: /data/SECURE_COOKIE
+        value: "false"
+  - target:
+      kind: ConfigMap
+      name: recommender-config
+    patch: |
+      - op: replace
+        path: /data/LOG_LEVEL
+        value: debug
+      # Отличие 4: кэш рекомендаций на 5 минут вместо суток.
+      # В dev нужно видеть результат правки промпта сразу, а не завтра.
+      - op: replace
+        path: /data/CACHE_TTL
+        value: "5m"
