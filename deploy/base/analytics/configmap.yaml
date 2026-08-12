@@ -10,7 +10,7 @@ data:
   SERVER_PORT: "8080"
   LOG_LEVEL: "info"
   LOG_FORMAT: "json"
-  KAFKA_BROKERS: "moodbot-kafka-kafka-bootstrap:9092"
+  KAFKA_BROKERS: "moodbot-kafka-kafka-bootstrap:9093"
   # СВОЯ consumer group, отличная от answers-writer.
   # Именно разные группы дают fan-out: каждый потребитель ведёт
   # собственный offset и читает ВСЕ сообщения топика. Одна группа

@@ -24,6 +24,10 @@ type Config struct {
 	// offset-ов и стартует с earliest). Понадобится при восстановлении
 	// после инцидента.
 	KafkaGroup string
+	// Учётные данные SASL. Пустой пользователь = подключение без
+	// аутентификации (слушатель 9092) — режим на время миграции.
+	KafkaUser     string
+	KafkaPassword string
 
 	ShutdownTimeout time.Duration
 	LogLevel        string
@@ -32,10 +36,12 @@ type Config struct {
 
 func loadConfig() (Config, error) {
 	c := Config{
-		Port:       common.Env("SERVER_PORT", "8080"),
-		KafkaGroup: common.Env("KAFKA_GROUP", "answers-writer"),
-		LogLevel:   common.Env("LOG_LEVEL", "info"),
-		LogFormat:  common.Env("LOG_FORMAT", "json"),
+		Port:          common.Env("SERVER_PORT", "8080"),
+		KafkaGroup:    common.Env("KAFKA_GROUP", "answers-writer"),
+		KafkaUser:     common.Env("KAFKA_USER", ""),
+		KafkaPassword: common.Env("KAFKA_PASSWORD", ""),
+		LogLevel:      common.Env("LOG_LEVEL", "info"),
+		LogFormat:     common.Env("LOG_FORMAT", "json"),
 	}
 
 	var err error

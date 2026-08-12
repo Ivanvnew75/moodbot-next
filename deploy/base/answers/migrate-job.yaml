@@ -31,8 +31,22 @@ spec:
       labels:
         app.kubernetes.io/name: answers
         app.kubernetes.io/component: migration
+        # part-of ЯВНО, а не через kustomize.
+        #
+        # Трансформер labels в kustomize добавляет метки в metadata
+        # объекта, но НЕ в шаблон пода (для этого есть отдельный
+        # includeTemplates). В результате под Job'а оказался без метки
+        # приложения, и NetworkPolicy отрезала его от ClickHouse:
+        # «ping clickhouse: i/o timeout» на пустом месте.
+        #
+        # Короткоживущие Job — первое, что забывают при внедрении
+        # default-deny: их нет в списке сервисов, они не висят в get pods,
+        # и ломаются они молча, при следующей выкатке схемы.
+        app.kubernetes.io/part-of: moodbot
     spec:
       restartPolicy: Never
+      serviceAccountName: answers
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
@@ -41,7 +55,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: migrate
-          image: ghcr.io/ivanvnew75/answers:0.2.0
+          image: ghcr.io/ivanvnew75/answers:0.2.0@sha256:ed6a5d436464ad4ff7c29b60376305c6893fcb54f0505976b5d8ca4101e79432
           imagePullPolicy: IfNotPresent   # digest подставит Kyverno, тянем из GHCR
           args: ["migrate"]
           env:

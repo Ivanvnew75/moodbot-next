@@ -91,6 +91,9 @@ func main() {
 		Group:    cfg.KafkaGroup,
 		DLQTopic: events.TopicAnswersDLQ,
 		Log:      logger,
+		// Аутентификация в Kafka. Пусто — значит слушатель без auth.
+		SASLUser:     cfg.KafkaUser,
+		SASLPassword: cfg.KafkaPassword,
 	})
 	defer consumer.Close()
 

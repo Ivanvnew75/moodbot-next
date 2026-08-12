@@ -12,6 +12,10 @@ type Config struct {
 
 	KafkaBrokers []string
 	KafkaGroup   string
+	// Учётные данные SASL. Пустой пользователь = подключение без
+	// аутентификации (слушатель 9092) — режим на время миграции.
+	KafkaUser     string
+	KafkaPassword string
 
 	ClickHouseAddr     string
 	ClickHouseDB       string
@@ -35,6 +39,8 @@ func loadConfig() (Config, error) {
 		ClickHouseDB:   common.Env("CLICKHOUSE_DB", "moodbot"),
 		ClickHouseUser: common.Env("CLICKHOUSE_USER", "analytics"),
 		ClickHouseTLS:  common.Env("CLICKHOUSE_TLS", "false") == "true",
+		KafkaUser:      common.Env("KAFKA_USER", ""),
+		KafkaPassword:  common.Env("KAFKA_PASSWORD", ""),
 		LogLevel:       common.Env("LOG_LEVEL", "info"),
 		LogFormat:      common.Env("LOG_FORMAT", "json"),
 	}

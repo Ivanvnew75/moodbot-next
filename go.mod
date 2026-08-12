@@ -4,7 +4,7 @@ go 1.26.5
 
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.48.0
-	github.com/Ivanvnew75/libs v0.6.0
+	github.com/Ivanvnew75/libs v0.7.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/labstack/echo/v4 v4.15.4
 	github.com/prometheus/client_golang v1.24.1
@@ -37,6 +37,9 @@ require (
 	github.com/shopspring/decimal v1.4.0 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasttemplate v1.2.2 // indirect
+	github.com/xdg-go/pbkdf2 v1.0.0 // indirect
+	github.com/xdg-go/scram v1.1.2 // indirect
+	github.com/xdg-go/stringprep v1.0.4 // indirect
 	go.opentelemetry.io/otel v1.44.0 // indirect
 	go.opentelemetry.io/otel/trace v1.44.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect

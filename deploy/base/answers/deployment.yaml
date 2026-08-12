@@ -39,6 +39,26 @@ spec:
       # раньше, группа заметит уход только по session.timeout, и на это
       # время партиции будут простаивать.
       terminationGracePeriodSeconds: 30
+      # СВОЙ ServiceAccount вместо default — и отключённое монтирование
+      # его токена.
+      #
+      # ЗАЧЕМ СВОЙ SA: он нужен Vault. Роль в Vault привязана к паре
+      # (имя SA, namespace), и именно этим сервис доказывает свою
+      # личность. С общим `default` все сервисы были бы одной личностью,
+      # и политики по путям потеряли бы смысл.
+      #
+      # ЗАЧЕМ automountServiceAccountToken: false: по умолчанию Kubernetes
+      # кладёт токен SA в КАЖДЫЙ под по пути
+      # /var/run/secrets/kubernetes.io/serviceaccount/token. Выполнение
+      # кода в контейнере даёт этот токен, а с ним — обращения к API
+      # кластера. Наши сервисы к API не обращаются вообще, значит токен
+      # им не нужен и монтировать его незачем.
+      #
+      # Vault от этого НЕ ломается: Vault Secrets Operator получает токен
+      # через TokenRequest API от имени SA, а не читает его из пода.
+      # Проверено — ротация секретов продолжает работать.
+      serviceAccountName: answers
+      automountServiceAccountToken: false
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
@@ -56,7 +76,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: answers
-          image: ghcr.io/ivanvnew75/answers:0.2.0
+          image: ghcr.io/ivanvnew75/answers:0.2.0@sha256:ed6a5d436464ad4ff7c29b60376305c6893fcb54f0505976b5d8ca4101e79432
           imagePullPolicy: IfNotPresent   # digest подставит Kyverno, тянем из GHCR
           ports:
             - name: http
@@ -72,6 +92,16 @@ spec:
             - configMapRef:
                 name: answers-config
           env:
+            # Учётные данные SASL для Kafka. Secret создаёт Strimzi
+            # по имени KafkaUser — пароль генерируется оператором
+            # и в git не попадает вовсе.
+            - name: KAFKA_USER
+              value: answers
+            - name: KAFKA_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: answers
+                  key: password
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
